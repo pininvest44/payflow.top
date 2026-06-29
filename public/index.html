@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payflow Bulk STK Push Portal</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; background-color: #f9f9f9; color: #333; }
+        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: 600; margin-bottom: 5px; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        textarea { height: 120px; font-family: monospace; }
+        button { background: #0066cc; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold; }
+        button:disabled { background: #cccccc; cursor: not-allowed; }
+        #logContainer { margin-top: 25px; background: #1e1e1e; color: #2ced60; padding: 15px; border-radius: 6px; font-family: monospace; height: 250px; overflow-y: auto; font-size: 13px; }
+        .log-info { color: #888; }
+        .log-success { color: #2ced60; font-weight: bold; }
+        .log-failure { color: #ff5c5c; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>Bulk STK Push Panel</h2>
+    <form id="stkForm">
+        <div class="form-group">
+            <label for="paymentAccountId">Payment Account ID</label>
+            <input type="number" id="paymentAccountId" value="17" required>
+        </div>
+        <div class="form-group">
+            <label for="phoneNumbers">Phone Numbers (One per line, format: 2547XXXXXXXX)</label>
+            <textarea id="phoneNumbers" placeholder="254712345678&#10;254722222222" required></textarea>
+        </div>
+        <div class="form-group">
+            <label for="amount">Amount (KES)</label>
+            <input type="number" id="amount" value="10" required>
+        </div>
+        <div class="form-group">
+            <label for="reference">Reference Prefix</label>
+            <input type="text" id="reference" value="BULK_ORDER" required>
+        </div>
+        <div class="form-group">
+            <label for="description">Description</label>
+            <input type="text" id="description" value="Bulk Batch Payment" required>
+        </div>
+        <button type="submit" id="submitBtn">Launch Bulk STK Push</button>
+    </form>
+
+    <div id="logContainer">--- System Logs Awaiting Deployment ---</div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
