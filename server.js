@@ -68,8 +68,8 @@ app.post('/api/process-bulk', async (req, res) => {
 
         // Rate limiter enforcement: 30 requests per minute means 1 request every 2000ms
         if (i < phoneNumbers.length - 1) {
-            res.write(`data: ${JSON.stringify({ status: 'info', message: `Waiting 5 seconds to respect rate limit...` })}\n\n`);
-            await delay(5000); 
+            res.write(`data: ${JSON.stringify({ status: 'info', message: `Waiting 2 seconds to respect rate limit...` })}\n\n`);
+            await delay(2000); 
         }
     }
 
