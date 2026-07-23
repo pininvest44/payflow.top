@@ -1,6 +1,17 @@
+const express = require('express');
+const axios = require('axios');
+const path = require('path');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
 app.post('/api/process-bulk', async (req, res) => {
     const { phoneNumbers, amount, reference, description, paymentAccountId } = req.body;
-    
+
     const apiKey = process.env.PAYFLOW_API_KEY;
     const apiSecret = process.env.PAYFLOW_API_SECRET;
 
@@ -12,16 +23,16 @@ app.post('/api/process-bulk', async (req, res) => {
         return res.status(400).json({ error: "No phone numbers provided." });
     }
 
-    // Set headers for SSE
+    // Configure headers for real-time SSE streaming
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('X-Accel-Buffering', 'no'); // Prevents proxy buffering (Nginx, Cloudflare)
 
     let isClientConnected = true;
     req.on('close', () => {
         isClientConnected = false;
-        console.log('Client disconnected from SSE stream.');
+        console.log('Client disconnected. Halting remaining requests.');
     });
 
     const sendSSE = (data) => {
@@ -30,13 +41,15 @@ app.post('/api/process-bulk', async (req, res) => {
         }
     };
 
-    // Filter out empty lines
     const validPhones = phoneNumbers.map(p => p.trim()).filter(Boolean);
-
-    sendSSE({ status: 'info', message: `Firing ${validPhones.length} requests simultaneously...` });
+    sendSSE({ status: 'info', message: `Processing ${validPhones.length} requests concurrently...` });
 
     // Single request handler function
     const sendStkPush = async (phone, index) => {
+        if (!isClientConnected) return;
+
+        sendSSE({ status: 'info', message: `Sending STK Push to ${phone}...` });
+
         try {
             const response = await axios.post(
                 'https://payflow.top/api/v2/stkpush.php',
@@ -53,35 +66,44 @@ app.post('/api/process-bulk', async (req, res) => {
                         'X-API-Secret': apiSecret,
                         'Content-Type': 'application/json'
                     },
-                    timeout: 15000
+                    timeout: 10000 // 10s per request timeout safety
                 }
             );
 
-            sendSSE({ 
-                status: 'success', 
-                phone: phone, 
-                message: `Success: ${JSON.stringify(response.data)}` 
+            sendSSE({
+                status: 'success',
+                phone: phone,
+                message: `Success: ${JSON.stringify(response.data)}`
             });
-            return response.data;
-
         } catch (error) {
             const errorMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-            sendSSE({ 
-                status: 'failure', 
-                phone: phone, 
-                message: `Failed: ${errorMsg}` 
+            sendSSE({
+                status: 'failure',
+                phone: phone,
+                message: `Failed: ${errorMsg}`
             });
-            return null;
         }
     };
 
-    // Promise.allSettled runs all promises in parallel concurrently
-    await Promise.allSettled(
-        validPhones.map((phone, idx) => sendStkPush(phone, idx))
-    );
+    // CONCURRENCY CONTROLLER: Adjust MAX_CONCURRENT based on tier limit
+    const MAX_CONCURRENT = 5; 
+    
+    // Process items in chunks of MAX_CONCURRENT simultaneously
+    for (let i = 0; i < validPhones.length; i += MAX_CONCURRENT) {
+        if (!isClientConnected) break;
+        
+        const batch = validPhones
+            .slice(i, i + MAX_CONCURRENT)
+            .map((phone, idx) => sendStkPush(phone, i + idx));
+
+        // Wait for current batch of concurrent requests to complete before firing the next batch
+        await Promise.allSettled(batch);
+    }
 
     if (isClientConnected) {
         sendSSE({ status: 'done', message: 'All parallel requests completed.' });
         res.end();
     }
 });
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
