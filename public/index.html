@@ -1,55 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payflow Bulk STK Push Portal</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; background-color: #f9f9f9; color: #333; }
-        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; font-weight: 600; margin-bottom: 5px; }
-        input, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
-        textarea { height: 120px; font-family: monospace; }
-        button { background: #0066cc; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold; }
-        button:disabled { background: #cccccc; cursor: not-allowed; }
-        #logContainer { margin-top: 25px; background: #1e1e1e; color: #2ced60; padding: 15px; border-radius: 6px; font-family: monospace; height: 250px; overflow-y: auto; font-size: 13px; }
-        .log-info { color: #888; }
-        .log-success { color: #2ced60; font-weight: bold; }
-        .log-failure { color: #ff5c5c; font-weight: bold; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulk STK Push Dispatcher</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
+<body class="bg-gray-100 min-h-screen p-6">
+  <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6">
+    <h1 class="text-2xl font-bold text-gray-800 mb-6">M-Pesa Bulk STK Push Dispatcher</h1>
 
-<div class="card">
-    <h2>Bulk STK Push Panel</h2>
-    <form id="stkForm">
-        <div class="form-group">
-            <label for="paymentAccountId">Payment Account ID</label>
-            <input type="number" id="paymentAccountId" value="17" required>
+    <form id="stkForm" class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Payment Account ID</label>
+          <input type="number" id="paymentAccountId" value="17" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
         </div>
-        <div class="form-group">
-            <label for="phoneNumbers">Phone Numbers (One per line, format: 2547XXXXXXXX)</label>
-            <textarea id="phoneNumbers" placeholder="254712345678&#10;254722222222" required></textarea>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Amount (KES)</label>
+          <input type="number" id="amount" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" placeholder="100">
         </div>
-        <div class="form-group">
-            <label for="amount">Amount (KES)</label>
-            <input type="number" id="amount" value="10" required>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Reference</label>
+          <input type="text" id="reference" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" placeholder="ORDER_001">
         </div>
-        <div class="form-group">
-            <label for="reference">Reference Prefix</label>
-            <input type="text" id="reference" value="BULK_ORDER" required>
-        </div>
-        <div class="form-group">
-            <label for="description">Description</label>
-            <input type="text" id="description" value="Bulk Batch Payment" required>
-        </div>
-        <button type="submit" id="submitBtn">Launch Bulk STK Push</button>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Description</label>
+        <input type="text" id="description" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" placeholder="Product Payment">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Phone Numbers (One per line or comma-separated)</label>
+        <textarea id="phoneNumbers" rows="6" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 font-mono text-sm" placeholder="254712345678&#10;254787654321"></textarea>
+      </div>
+
+      <button type="submit" id="submitBtn" class="w-full bg-emerald-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-emerald-700 transition">
+        Start Bulk STK Push
+      </button>
     </form>
 
-    <div id="logContainer">--- System Logs Awaiting Deployment ---</div>
-</div>
+    <!-- Progress & Logs -->
+    <div class="mt-8">
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-lg font-semibold text-gray-700">Execution Logs</h2>
+        <span id="progressText" class="text-sm font-medium text-gray-500">0 / 0</span>
+      </div>
+      
+      <div class="w-full bg-gray-200 rounded-full h-2.5 mb-4">
+        <div id="progressBar" class="bg-emerald-600 h-2.5 rounded-full w-0 transition-all duration-300"></div>
+      </div>
 
-<script src="app.js"></script>
+      <div id="logs" class="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-xs h-64 overflow-y-auto space-y-1">
+        <p class="text-gray-500">// Logs will appear here after triggering execution...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('stkForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const logsDiv = document.getElementById('logs');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const rawPhones = document.getElementById('phoneNumbers').value;
+      const phoneNumbers = rawPhones.split(/[\n,]/).map(p => p.trim()).filter(Boolean);
+
+      if (phoneNumbers.length === 0) return alert('Enter at least one phone number.');
+
+      submitBtn.disabled = true;
+      submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      logsDiv.innerHTML = '';
+      
+      let completed = 0;
+      let total = phoneNumbers.length;
+      progressText.innerText = `0 / ${total}`;
+      progressBar.style.width = '0%';
+
+      const payload = {
+        paymentAccountId: document.getElementById('paymentAccountId').value,
+        amount: document.getElementById('amount').value,
+        reference: document.getElementById('reference').value,
+        description: document.getElementById('description').value,
+        phoneNumbers
+      };
+
+      try {
+        const response = await fetch('/api/stkpush/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const event = JSON.parse(line.replace('data: ', ''));
+
+              if (event.type === 'start') {
+                total = event.total;
+              } else if (event.type === 'result') {
+                completed++;
+                const percentage = Math.round((completed / total) * 100);
+                progressBar.style.width = `${percentage}%`;
+                progressText.innerText = `${completed} / ${total}`;
+
+                const logItem = document.createElement('div');
+                if (event.status === 'success') {
+                  logItem.className = 'text-green-400';
+                  logItem.innerText = `[SUCCESS] ${event.phone} | Sent successfully`;
+                } else {
+                  logItem.className = 'text-red-400';
+                  logItem.innerText = `[FAILED]  ${event.phone} | ${event.error}`;
+                }
+                logsDiv.appendChild(logItem);
+                logsDiv.scrollTop = logsDiv.scrollHeight;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        alert('Stream error: ' + err.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
+    });
+  </script>
 </body>
 </html>
