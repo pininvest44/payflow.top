@@ -1,109 +1,115 @@
 const express = require('express');
-const axios = require('axios');
+const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.post('/api/process-bulk', async (req, res) => {
-    const { phoneNumbers, amount, reference, description, paymentAccountId } = req.body;
+// Helper to pause execution for rate limiting
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    const apiKey = process.env.PAYFLOW_API_KEY;
-    const apiSecret = process.env.PAYFLOW_API_SECRET;
+app.post('/api/stkpush/bulk', async (req, res) => {
+  const { phoneNumbers, amount, reference, description, paymentAccountId } = req.body;
 
-    if (!apiKey || !apiSecret) {
-        return res.status(500).json({ error: "API credentials are not configured on the server." });
-    }
+  if (!phoneNumbers || !Array.isArray(phoneNumbers) || phoneNumbers.length === 0) {
+    return res.status(400).json({ error: 'Valid phone numbers list is required.' });
+  }
 
-    if (!Array.isArray(phoneNumbers) || phoneNumbers.length === 0) {
-        return res.status(400).json({ error: "No phone numbers provided." });
-    }
+  if (!amount || !reference || !paymentAccountId) {
+    return res.status(400).json({ error: 'Amount, Reference, and Payment Account ID are required.' });
+  }
 
-    // Configure headers for real-time SSE streaming
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // Prevents proxy buffering (Nginx, Cloudflare)
+  const apiKey = process.env.PAYFLOW_API_KEY;
+  const apiSecret = process.env.PAYFLOW_API_SECRET;
 
-    let isClientConnected = true;
-    req.on('close', () => {
-        isClientConnected = false;
-        console.log('Client disconnected. Halting remaining requests.');
+  if (!apiKey || !apiSecret) {
+    return res.status(500).json({ error: 'Server misconfiguration: API credentials missing.' });
+  }
+
+  // Set up Server-Sent Events (SSE) stream for live updates
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const sendEvent = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const total = phoneNumbers.length;
+  sendEvent({ type: 'start', total });
+
+  const BATCH_SIZE = 10; // Max 10 req/sec
+
+  for (let i = 0; i < total; i += BATCH_SIZE) {
+    const batch = phoneNumbers.slice(i, i + BATCH_SIZE);
+    const batchStartTime = Date.now();
+
+    const promises = batch.map(async (phone) => {
+      const formattedPhone = phone.trim().replace(/^\+/, '');
+      const payload = {
+        payment_account_id: Number(paymentAccountId),
+        phone: formattedPhone,
+        amount: Number(amount),
+        reference,
+        description: description || 'Bulk payment'
+      };
+
+      try {
+        const apiResponse = await fetch('https://payflow.top/api/v2/stkpush.php', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+            'X-API-Secret': apiSecret
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await apiResponse.json();
+
+        if (apiResponse.ok) {
+          sendEvent({
+            type: 'result',
+            status: 'success',
+            phone: formattedPhone,
+            data
+          });
+        } else {
+          sendEvent({
+            type: 'result',
+            status: 'error',
+            phone: formattedPhone,
+            error: data.message || 'Payment provider error'
+          });
+        }
+      } catch (err) {
+        sendEvent({
+          type: 'result',
+          status: 'error',
+          phone: formattedPhone,
+          error: err.message
+        });
+      }
     });
 
-    const sendSSE = (data) => {
-        if (isClientConnected) {
-            res.write(`data: ${JSON.stringify(data)}\n\n`);
-        }
-    };
+    await Promise.all(promises);
 
-    const validPhones = phoneNumbers.map(p => p.trim()).filter(Boolean);
-    sendSSE({ status: 'info', message: `Processing ${validPhones.length} requests concurrently...` });
-
-    // Single request handler function
-    const sendStkPush = async (phone, index) => {
-        if (!isClientConnected) return;
-
-        sendSSE({ status: 'info', message: `Sending STK Push to ${phone}...` });
-
-        try {
-            const response = await axios.post(
-                'https://payflow.top/api/v2/stkpush.php',
-                {
-                    payment_account_id: parseInt(paymentAccountId, 10) || 17,
-                    phone: phone,
-                    amount: parseFloat(amount),
-                    reference: reference ? `${reference}_${index}` : `REF_${Date.now()}_${index}`,
-                    description: description || "Bulk Payment"
-                },
-                {
-                    headers: {
-                        'X-API-Key': apiKey,
-                        'X-API-Secret': apiSecret,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 10000 // 10s per request timeout safety
-                }
-            );
-
-            sendSSE({
-                status: 'success',
-                phone: phone,
-                message: `Success: ${JSON.stringify(response.data)}`
-            });
-        } catch (error) {
-            const errorMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-            sendSSE({
-                status: 'failure',
-                phone: phone,
-                message: `Failed: ${errorMsg}`
-            });
-        }
-    };
-
-    // CONCURRENCY CONTROLLER: Adjust MAX_CONCURRENT based on tier limit
-    const MAX_CONCURRENT = 5; 
-    
-    // Process items in chunks of MAX_CONCURRENT simultaneously
-    for (let i = 0; i < validPhones.length; i += MAX_CONCURRENT) {
-        if (!isClientConnected) break;
-        
-        const batch = validPhones
-            .slice(i, i + MAX_CONCURRENT)
-            .map((phone, idx) => sendStkPush(phone, i + idx));
-
-        // Wait for current batch of concurrent requests to complete before firing the next batch
-        await Promise.allSettled(batch);
+    // Enforce rate limit (1 second per batch of 10)
+    const elapsedTime = Date.now() - batchStartTime;
+    if (elapsedTime < 1000 && i + BATCH_SIZE < total) {
+      await sleep(1000 - elapsedTime);
     }
+  }
 
-    if (isClientConnected) {
-        sendSSE({ status: 'done', message: 'All parallel requests completed.' });
-        res.end();
-    }
+  sendEvent({ type: 'done' });
+  res.end();
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
